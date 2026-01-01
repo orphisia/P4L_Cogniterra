@@ -43,4 +43,77 @@ async function main(){
     initializeDatabase();
 
     cleanupExpiredTokens();
+
+    //API Client
+    const stepikClient = new StepikAPI(process.env.STEPIK_CLIENT_ID, 
+        process.env.STEPIK_CLIENT_SECRET);
+    //Dicord Bot
+    const bot = new DiscordBot(process.env.DISCORD_BOT_TOKEN, 
+        process.env.DISCORD_CLIENT_ID, stepikClient);
+
+    const discordClient = await bot.start();
+
+    const progressTracker = new ProgressTracker(stepikClient, discordClient);
+    global.progressTracker = progressTracker;
+
+    //5 minute interval
+    const pollInterval = parseInt(process.env.POLL_INTERVAL) || 300000;
+
+    const app = createWebServer(stepikClient);
+
+    const port = process.env.PORT || 3000;
+
+    const server = app.listen(port, () => {
+        console.log(`\n Bot is operational`);
+        console.log(` Web server running on port ${port}`);
+        console.log(` OAuth callback URL: ${process.env.BASE_URL}/auth/callback`);
+        console.log(`Polling interval: ${pollInterval / 1000} seconds\n`);
+      });
+
+    //Cleanup expired tokens every hour
+    setInterval(() => {
+        const deleted = cleanupExpiredTokens();
+        if (deleted.changes > 0) {
+          console.log(`Cleaned up ${deleted.changes} expired link tokens`);
+        }
+      }, 3600000);    
+
+  // Graceful shutdown
+  process.on('SIGINT', () => {
+    console.log('\n🛑 Shutting down gracefully...');
+    
+    progressTracker.stopPolling();
+    bot.stop();
+    server.close(() => {
+      console.log('✅ Server closed');
+      process.exit(0);
+    });
+  });
+
+  process.on('SIGTERM', () => {
+    console.log('\n🛑 Shutting down gracefully...');
+    
+    progressTracker.stopPolling();
+    bot.stop();
+    server.close(() => {
+      console.log('✅ Server closed');
+      process.exit(0);
+    });
+  });
 }
+
+// Handle uncaught errors
+process.on('uncaughtException', (error) => {
+  console.error('❌ Uncaught Exception:', error);
+  process.exit(1);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('❌ Unhandled Rejection at:', promise, 'reason:', reason);
+});
+
+// Start the bot
+main().catch(error => {
+  console.error('❌ Failed to start bot:', error);
+  process.exit(1);
+});
